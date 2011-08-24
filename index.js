@@ -150,7 +150,7 @@ var define = function(method) {
 
 		return req;
 	};
-}
+};
 
 exports.cors = ('withCredentials' in new XMLHttpRequest());
 
