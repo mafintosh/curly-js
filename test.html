@@ -1,0 +1,19 @@
+<html>
+<head>
+	<title>curly test</title>
+	<script src='http://localhost:9999/~/projects'></script>
+	<script>
+		var curly = require('curly');
+
+		curly.get('http://localhost:4455/json').json(function(err, data) {
+			console.log(err, data);
+		});
+		curly.post('http://localhost:4455/json').json({hello:'world'}, function(err, data) {
+			console.log(err, data);
+		});
+	</script>
+</head>
+<body>
+	<h1>i am a h1</h1>
+</body>
+</html>
