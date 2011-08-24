@@ -1,3 +1,20 @@
+if (typeof XMLHttpRequest == 'undefined') {
+	XMLHttpRequest = function () {
+		try {
+			return new ActiveXObject('Msxml2.XMLHTTP.6.0');
+		} catch (e) {}
+		try {
+			return new ActiveXObject('Msxml2.XMLHTTP.3.0');
+		} catch (e) {}
+		try {
+			return new ActiveXObject('Microsoft.XMLHTTP');
+		} catch (e) {}
+		
+		// Microsoft.XMLHTTP points to Msxml2.XMLHTTP and is redundant
+		throw new Error('This browser does not support XMLHttpRequest.');
+	};
+}
+
 var querify = function(query) {
 	var result = '';
 
@@ -134,6 +151,8 @@ var define = function(method) {
 		return req;
 	};
 }
+
+exports.cors = ('withCredentials' in new XMLHttpRequest());
 
 for (var method in methods) {
 	exports[(methods[method] || method).toLowerCase()] = define(method);
