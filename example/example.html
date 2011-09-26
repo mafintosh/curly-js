@@ -1,0 +1,26 @@
+<html>
+<head>
+	<title>curly</title>
+	<script src='http://localhost:9999/~/projects/'></script>
+	<script>
+		var $ = require('jQuery');
+
+		var log = function(str) {
+			str = typeof str === 'string' ? str : JSON.stringify(str);
+
+			$(function() {
+				$('#log').html($('#log').html() + str + '<br>');
+			});
+		};
+
+		var curly = require('curly');
+
+		curly.jsonp('/ua').strict().query({abe:'fest'}, function(err, ua) {
+			log(ua);
+		});
+	</script>
+</head>
+<body>
+	<pre id='log'></pre>
+</body>
+</html>
