@@ -20,6 +20,9 @@ curly.post('/myapp')
 	 .timeout(2000)
 	 .json({hello:'world'}, callback); // request must take less than 2s and we send and expect json
 
+curly.jsonp('/myjsonp')
+     .query({abe:'fest'}, callback); // jsonp will look for a query with the format name=? to insert the callback. If none present it will add callback=?
+
 ```
 
-besides `get` and `post` curly supports `put` and `del`.  
+besides `get`, `post` and `jsonp` curly supports `put`, and `del`.  
