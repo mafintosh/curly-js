@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html><head>
+	<title>curly cors proxy</title>
+	<script>
+		if (typeof XMLHttpRequest == 'undefined') {
+			XMLHttpRequest = function () {
+				try {
+					return new ActiveXObject('Msxml2.XMLHTTP.6.0');
+				} catch (e) {}
+				try {
+					return new ActiveXObject('Msxml2.XMLHTTP.3.0');
+				} catch (e) {}
+				try {
+					return new ActiveXObject('Microsoft.XMLHTTP');
+				} catch (e) {}
+				
+				// Microsoft.XMLHTTP points to Msxml2.XMLHTTP and is redundant
+				throw new Error('This browser does not support XMLHttpRequest.');
+			};
+		}
+
+		var noop = function() {};
+
+		var requests = 0;
+		var active = {};
+		var pool = [];
+
+		window.onunload = function() {
+			for (var i in active) {
+				active[i].abort();
+			}
+		};
+
+		var request = function(method, url, data, callback) {
+			var xhr = pool.length ? pool.pop() : new XMLHttpRequest();
+			var id = ''+(++requests);
+			
+			active[id] = xhr;
+			
+			var tidy = function() {
+				delete active[id];
+				xhr.onreadystatechange = noop;		
+			};
+			var onresponse = function() {
+				pool.push(xhr);
+				callback(!(/2\d\d/.test(xhr.status)) && new Error('invalid status='+xhr.status), xhr.responseText);
+			};
+
+			xhr.open(method, url, true);
+			xhr.onreadystatechange = function() {
+				if (xhr.readyState !== 4) {
+					return;
+				}
+				tidy();
+				setTimeout(onresponse, 1); // push it to the event stack
+			};
+			xhr.send(data);
+			
+			return function() {
+				tidy();
+				xhr.abort();
+				callback(new Error('request aborted'));
+			};
+		};
+
+		window.onload = function() {
+			var win = window.top;
+			var destroys = {};
+
+			win.postMessage('load', '*');
+
+			window.addEventListener('message', function(e) {
+				var message = JSON.parse(e.data);
+
+				if (message.name === 'request') {
+					message.params.push(function(err, val) {
+						delete destroys[message.id];
+						window.top.postMessage(JSON.stringify({error:(err ? err.message : null), result:val, id:message.id}), '*');
+					});
+					destroys[message.id] = request.apply(null, message.params);
+					return;
+				}
+				if (message.name === 'destroy') {
+					(destroys[message.id] || noop)();
+					delete destroys[message.id];
+					return;
+				}
+			}, false);
+
+		};
+	</script>
+</head><body></body></html>

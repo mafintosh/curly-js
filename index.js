@@ -14,18 +14,12 @@ if (typeof XMLHttpRequest == 'undefined') {
 		throw new Error('This browser does not support XMLHttpRequest.');
 	};
 }
-
-var querify = function(query) {
-	var result = '';
-
-	for (var i in query) {
-		result += i+'='+encodeURIComponent(query[i]);
-	}
-	return result;
-};
 var noop = function() {};
 
-var requests = 0;
+var prefix = (new Date()).getTime().toString(36);
+var cache = {};
+var globalScope = window._tmp_jsonp = {}; // A global variable to reference jsonp closures
+var cnt = 0;
 var active = {};
 var pool = [];
 
@@ -35,9 +29,170 @@ window.onunload = function() {
 	}
 };
 
-var Request = function(method, url) {
+var addEvent = function(name, fn) {
+	if (window.attachEvent) {
+		window.attachEvent('on'+name, fn);
+	} else {
+		window.addEventListener(name, fn, false);
+	}
+};
+var onbody = function(fn) {
+	if (document.body) {
+		fn();
+	} else {
+		addEvent('load', fn);
+	}
+};
+var querify = function(query) {
+	var result = '';
+
+	for (var i in query) {
+		result += i+'='+encodeURIComponent(query[i]);
+	}
+	return result;
+};
+var send = function(method, path, data, ondone) {
+	var xhr = pool.length ? pool.pop() : new XMLHttpRequest();
+
+	var id = ''+(++cnt);
+	var called = false;
+
+	var callback = function(err, value) {
+		if (called) {
+			return;
+		}
+		called = true;
+		ondone(err, value);
+	};
+
+	active[id] = xhr;
+	
+	var tidy = function() {
+		delete active[id];
+		xhr.onreadystatechange = noop;		
+	};
+	var onresponse = function() {
+		pool.push(xhr);
+
+		if (!/2\d\d/.test(xhr.status)) {
+			callback(new Error('invalid status='+xhr.status));
+			return
+		}
+		callback(null, xhr.responseText);
+	};
+
+	xhr.open(method, path, true);
+	xhr.onreadystatechange = function() {
+		if (xhr.readyState !== 4) {
+			return;
+		}
+		tidy();
+		setTimeout(onresponse, 1); // push it to the event stack
+	};
+	xhr.send(data);
+	
+	return function() {
+		if (called) {
+			return;
+		}
+		tidy();
+		xhr.abort();
+		callback(new Error('request aborted'));
+	};
+};
+var proxy = function(url) {
+	if (url.indexOf('://') === -1) {
+		url = window.location.protocol+'//'+window.location.host+url;
+	}
+	if (cache[url]) {
+		return cache[url];
+	}
+
+	var host = url.match(/^[^:]+:\/\/[^\/]+/i)[0];
+	var callbacks = {};
+	var stack = [];
+
+	var post = function() {
+		var ifr = document.createElement('iframe');
+
+		ifr.src = url;
+		ifr.style.display = 'none';
+
+		onbody(function() {
+			document.body.appendChild(ifr);		
+		});
+		
+		return function(message) {
+			ifr.contentWindow.postMessage(JSON.stringify(message), '*');
+			message = null; // no ie leaks					
+		};
+	}();
+	var send = function(message, callback) {
+		var destroy;
+
+		stack.push(function() {
+			if (destroy) {
+				return;
+			}
+			destroy = send(message, callback);
+		});
+		return function() {
+			if (destroy) {
+				destroy();
+				return;
+			}
+			destroy = true;
+			callback(new Error('request cancelled'));
+		};
+	};
+	var ready = function() {
+		send = function(params, callback) {
+			var id = 's'+(cnt++);
+			
+			callbacks[id] = function(err, result) {
+				delete callbacks[id];
+
+				callback(err, result);
+			};
+			post({name:'request', id:id, params:params});
+
+			return function() {
+				if (callbacks[id]) {
+					post({name:'destroy', id:id});
+					callbacks[id](new Error('request cancelled'));
+				}
+			};
+		};
+		while (stack.length) {
+			stack.shift()();
+		}
+		stack = undefined;
+	};
+
+	window.addEventListener('message', function(e) {
+		if (e.origin !== host) {
+			return;
+		}
+		if (stack) {
+			ready();
+			return;
+		}
+		var message = JSON.parse(e.data);
+
+		(callbacks[message.id] || noop)(message.error && new Error(message.error), message.result);				
+		message = null; // no ie leaks
+	}, false);
+
+	return cache[url] = function(method, path, data, callback) {
+		return send([method, path, data], callback);
+	};
+};
+
+
+var Request = function(method, url, send) {
 	url = url.split('?');
 
+	this._send = send;
 	this._method = method;
 	this._url = url[0];
 	this._query = url[1] || '';
@@ -76,56 +231,27 @@ Request.prototype.send = function(data, callback) {
 		callback = data;
 		data = null;
 	} else {
-		data = this._encode(data);				
+		data = this._encode(data);
 	}
 
 	var self = this;
-	var xhr = pool.length ? pool.pop() : new XMLHttpRequest();
 
-	var id = ''+(++requests);			
-
-	active[id] = xhr;
-	
-	var tidy = function() {
-		delete active[id];
-		xhr.onreadystatechange = noop;		
-	};
-	var onresponse = function() {
-		pool.push(xhr);
-
+	this.destroy = this._send(this._method, this._url+this._query, data, function(err, value) {
 		if (self._timeout) {
 			clearTimeout(self._timeout);
 		}
-		if (!/2\d\d/.test(xhr.status)) {
-			callback(new Error('invalid status='+xhr.status));
-			return
+		if (err) {
+			callback(err);
+			return;
 		}
-		var response;
-
 		try {
-			response = self._decode(xhr.responseText);
+			value = self._decode(value);
 		} catch(err) {
 			callback(err);
 			return;
 		}
-		callback(null, response);
-	};
-
-	xhr.open(this._method, this._url+this._query, true);
-	xhr.onreadystatechange = function() {
-		if (xhr.readyState !== 4) {
-			return;
-		}
-		tidy();
-		setTimeout(onresponse, 1); // push it to the event stack
-	};
-	xhr.send(data);
-	
-	this.destroy = function() {
-		tidy();
-		xhr.abort();
-		callback(new Error('request aborted'));
-	};
+		callback(null, value);
+	});
 
 	return this;
 };
@@ -138,10 +264,6 @@ Request.prototype._encode = function(data) {
 Request.prototype._decode = function(data) {
 	return data;
 };
-
-var prefix = (new Date()).getTime().toString(36);
-var globalScope = window._tmp_jsonp = {}; // A global variable to reference jsonp closures
-var cnt = 0;
 
 var JSONP = function(url) {
 	url = url.split('?');
@@ -156,6 +278,10 @@ JSONP.prototype.query = Request.prototype.query; // exactly the same
 JSONP.prototype.strict = function(callback) {
 	this._strict = true;
 	return this._short(callback);	
+};
+JSONP.prototype.async = function(callback) {
+	this._async = true;
+	return this._short(callback);
 };
 JSONP.prototype.send = function(method, callback) {
 	if (!callback && typeof method !== 'string') {
@@ -190,7 +316,6 @@ JSONP.prototype.send = function(method, callback) {
 		el = null; // no mem leaks
 
 		delete globalScope[id];
-
 		self.destroy = noop;
 
 		callback(err, result);
@@ -211,28 +336,43 @@ JSONP.prototype.send = function(method, callback) {
 		onresult(null, result);
 	};
 
-	if (document.body) {
-		var el = document.createElement('script');
+	var attachErrorHandling = function() {
+		if (!document.getElementById(id)) {
+			return; // safety
+		}
+		document.getElementById(id).onreadystatechange = function() {
+			if (ended || (this.readyState !== 'loaded' && this.readyState !== 'complete')) {
+				return;
+			}
+			onresult(new Error('jsonp request failed'));								
+		};		
+	};
 
-		el.async = true;
-		el.src = url;
-		el.id = id;
+	if (document.body || this._async) {
+		onbody(function() {
+			var el = document.createElement('script');
 
-		document.body.appendChild(el);
-		el = null; // no leaks
+			el.async = true;
+			el.src = url;
+			el.id = id;
+
+			document.body.appendChild(el);
+			
+			el = null; // no leaks
+			attachErrorHandling();
+		});
 	} else {
 		document.write(unescape('%3Cscript')+' src="'+url+'" id="'+id+'"'+unescape('%3E%3C/script%3E'));
+		attachErrorHandling();
 	}
-
-	document.getElementById(id).onreadystatechange = function() {
-		if (ended || (this.readyState !== 'loaded' && this.readyState !== 'complete')) {
-			return;
-		}
-		onresult(new Error('jsonp request failed'));								
-	};
 	
 	this.destroy = function() {
 		onresult(new Error('jsonp request was cancelled'));
+		globalScope[id] = noop;
+
+		setTimeout(function() { 
+			delete globalScope[id]; // we lazy collect the noop after 2 mins to allow the server to respond without an error
+		}, 2*60*1000);
 	};
 
 	return this;
@@ -244,9 +384,9 @@ JSONP.prototype._short = Request.prototype._short; // exactly the same
 
 var methods = {'POST':0, 'GET':0, 'DELETE':'del', 'PUT':0};
 
-var define = function(method) {
+var define = function(method, sender) {
 	return function(url, callback) {
-		var req = new Request(method, url);
+		var req = new Request(method, url, sender || send);
 
 		if (callback) {
 			req.send(callback);
@@ -265,6 +405,18 @@ exports.jsonp = function(url, callback) {
 		req.send(callback);
 	}
 	return req;
+};
+exports.proxy = function(host) {
+	var that = {};
+	var send = proxy(host);
+
+	for (var method in methods) {
+		that[(methods[method] || method).toLowerCase()] = define(method, send);
+	}
+	that.proxy = exports.proxy;
+	that.jsonp = exports.jsonp;
+
+	return that;
 };
 
 for (var method in methods) {

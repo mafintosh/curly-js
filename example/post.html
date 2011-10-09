@@ -1,0 +1,115 @@
+<html>
+<head>
+	<title>curly</title>
+	<script src='http://localhost:9999/~/projects/'></script>
+	<script>
+		var $ = require('jQuery');
+
+		var log = function(str) {
+			str = typeof str === 'string' ? str : JSON.stringify(str);
+
+			$(function() {
+				$('#log').html($('#log').html() + str + '<br>');
+			});
+		};
+
+		var noop = function() {};
+
+		var proxy = function(url) {
+			if (url.indexOf('://') === -1) {
+				url = window.location.protocol+'//'+window.location.host+url;
+			}
+
+			var host = url.match(/^[^:]+:\/\/[^\/]+/i)[0];
+			var cnt = 0;
+			var callbacks = {};
+			var stack = [];
+
+			var post = function() {
+				var ifr = document.createElement('iframe');
+
+				ifr.src = url;
+				ifr.style.display = 'none';
+
+				document.body.appendChild(ifr);
+				
+				return function(message) {
+					ifr.contentWindow.postMessage(JSON.stringify(message), '*');
+					message = null; // no ie leaks					
+				};
+			}();
+			var send = function(message, callback) {
+				var destroy;
+
+				stack.push(function() {
+					if (destroy) {
+						return;
+					}
+					destroy = send(message, callback);
+				});
+				return function() {
+					if (destroy) {
+						destroy();
+						callback(new Error('request cancelled'));
+						return;
+					}
+					destroy = true;
+				};
+			};
+			var ready = function() {
+				send = function(params, callback) {
+					var id = 's'+(cnt++);
+					
+					callbacks[id] = function(err, result) {
+						delete callbacks[id];
+
+						callback(err, result);
+					};
+					post({name:'request', id:id, params:params});
+
+					return function() {
+						if (callbacks[id]) {
+							post({name:'destroy', id:id});
+							callbacks[id](new Error('request cancelled'));
+						}
+					};
+				};
+				while (stack.length) {
+					stack.shift()();
+				}
+				stack = undefined;
+			};
+
+			window.addEventListener('message', function(e) {
+				if (e.origin !== host) {
+					return;
+				}
+				if (stack) {
+					ready();
+					return;
+				}
+				var message = JSON.parse(e.data);
+
+				(callbacks[message.id] || noop)(message.error && new Error(message.error), message.result);				
+				message = null; // no ie leaks
+			}, false);
+
+			return function(message, callback) {
+				return send(message, callback);
+			};
+		};
+
+		$(function() {		
+			var send = proxy('/proxy');
+
+			send(['GET', '/proxy', ''], function(err, res) {
+				console.log(err, res);
+			});
+		});
+
+	</script>
+</head>
+<body>
+	<pre id='log'></pre>
+</body>
+</html>

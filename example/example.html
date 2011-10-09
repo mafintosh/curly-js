@@ -16,7 +16,20 @@
 		var curly = require('curly');
 
 		curly.jsonp('/ua').strict().query({abe:'fest'}, function(err, ua) {
-			log(ua);
+			log('curly-ua: ' + ua);
+		});
+		curly.get('/time').json(function(err, res) {
+			log('curly-time: ' + res);
+		});
+
+		var proxy = curly.proxy('http://127.0.0.1:7777/proxy');
+
+		proxy.jsonp('/ua').strict().query({abe:'fest'}, function(err, ua) {
+			log('proxy-ua: '+ua);
+		});
+
+		proxy.get('/time').json(function(err, res) {
+			log('proxy-time: ' + res);
 		});
 	</script>
 </head>
