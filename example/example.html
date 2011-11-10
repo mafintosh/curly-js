@@ -31,6 +31,15 @@
 		proxy.get('/time').json(function(err, res) {
 			log('proxy-time: ' + res);
 		});
+
+		setInterval(function() {
+			curly.get('/time').json(function(err, res) {
+				log('curly-time: ' + res);
+			});
+			proxy.get('/time').json(function(err, res) {
+				log('proxy-time: ' + res);
+			});
+		}, 500);
 	</script>
 </head>
 <body>

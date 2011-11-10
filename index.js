@@ -169,7 +169,7 @@ var proxy = function(url) {
 		stack = undefined;
 	};
 
-	window.addEventListener('message', function(e) {
+	addEvent('message', function(e) {
 		if (e.origin !== host) {
 			return;
 		}
@@ -181,7 +181,7 @@ var proxy = function(url) {
 
 		(callbacks[message.id] || noop)(message.error && new Error(message.error), message.result);				
 		message = null; // no ie leaks
-	}, false);
+	});
 
 	return cache[url] = function(method, path, data, callback) {
 		return send([method, path, data], callback);
@@ -195,7 +195,7 @@ var Request = function(method, url, send) {
 	this._send = send;
 	this._method = method;
 	this._url = url[0];
-	this._query = url[1] || '';
+	this._query = (url[1] || '') && '?'+url[1];
 };
 
 Request.prototype.timeout = function(ms, callback) {
@@ -395,8 +395,14 @@ var define = function(method, sender) {
 		return req;
 	};
 };
+var defineTo = function(that, send) {
+	for (var method in methods) {
+		that[(methods[method] || method).toLowerCase()] = define(method, send);
+	}	
+};
 
 exports.cors = ('withCredentials' in new XMLHttpRequest());
+exports.proxyable = typeof window.postMessage === 'function';
 
 exports.jsonp = function(url, callback) {
 	var req = new JSONP(url);
@@ -407,18 +413,21 @@ exports.jsonp = function(url, callback) {
 	return req;
 };
 exports.proxy = function(host) {
+	if (!exports.proxyable) {
+		return null;
+	}
+	
 	var that = {};
 	var send = proxy(host);
 
-	for (var method in methods) {
-		that[(methods[method] || method).toLowerCase()] = define(method, send);
-	}
+	defineTo(that, send);
+
+	that.cors = exports.cors;
+	that.proxyable = exports.proxyable;
 	that.proxy = exports.proxy;
 	that.jsonp = exports.jsonp;
 
 	return that;
 };
 
-for (var method in methods) {
-	exports[(methods[method] || method).toLowerCase()] = define(method);
-}
+defineTo(exports, send);
