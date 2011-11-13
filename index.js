@@ -29,6 +29,9 @@ window.onunload = function() {
 	}
 };
 
+var hostify = function(address) {
+	return address.match(/(http|https):\/\/([^\/]+)/).slice(1).join('://');
+};
 var addEvent = function(name, fn) {
 	if (window.attachEvent) {
 		window.attachEvent('on'+name, fn);
@@ -148,7 +151,7 @@ var proxy = function(url) {
 	var ready = function() {
 		send = function(params, callback) {
 			var id = 's'+(cnt++);
-			
+
 			callbacks[id] = function(err, result) {
 				delete callbacks[id];
 
@@ -163,6 +166,7 @@ var proxy = function(url) {
 				}
 			};
 		};
+
 		while (stack.length) {
 			stack.shift()();
 		}
@@ -173,6 +177,7 @@ var proxy = function(url) {
 		if (e.origin !== host) {
 			return;
 		}
+
 		if (stack) {
 			ready();
 			return;
@@ -395,14 +400,21 @@ var define = function(method, sender) {
 		return req;
 	};
 };
-var defineTo = function(that, send) {
+var defineTo = function(that, type, send) {
 	for (var method in methods) {
 		that[(methods[method] || method).toLowerCase()] = define(method, send);
-	}	
+	}
+	that['delete'] = that.del;
+
+	that.type = type;
+	that.cors = exports.cors;
+	that.jsonp = exports.jsonp;
+
+	return that;
 };
 
-exports.cors = ('withCredentials' in new XMLHttpRequest());
-exports.proxyable = typeof window.postMessage === 'function';
+var corsable = ('withCredentials' in new XMLHttpRequest());
+var proxyable = !!window.postMessage;
 
 exports.jsonp = function(url, callback) {
 	var req = new JSONP(url);
@@ -412,22 +424,18 @@ exports.jsonp = function(url, callback) {
 	}
 	return req;
 };
-exports.proxy = function(host) {
-	if (!exports.proxyable) {
-		return null;
+exports.cors = function(proxyHost) {
+	if (corsable) {
+		var host = hostify(proxyHost);
+
+		return defineTo({}, 'cors', function(method, path, data, ondone) {
+			send(method, host+path, data, ondone);
+		});
 	}
-	
-	var that = {};
-	var send = proxy(host);
-
-	defineTo(that, send);
-
-	that.cors = exports.cors;
-	that.proxyable = exports.proxyable;
-	that.proxy = exports.proxy;
-	that.jsonp = exports.jsonp;
-
-	return that;
+	if (proxyable) {
+		return defineTo({}, 'proxy', proxy(proxyHost));
+	}
+	return null;
 };
 
-defineTo(exports, send);
+defineTo(exports, 'ajax', send);
