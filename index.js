@@ -50,6 +50,9 @@ var querify = function(query) {
 	var result = '';
 
 	for (var i in query) {
+		if (result) {
+			result += '&';
+		}
 		result += i+'='+encodeURIComponent(query[i]);
 	}
 	return result;
@@ -144,7 +147,7 @@ var proxy = function(url) {
 				destroy();
 				return;
 			}
-			destroy = true;
+			destroy = noop;
 			callback(new Error('request cancelled'));
 		};
 	};
@@ -206,9 +209,11 @@ var Request = function(method, url, send) {
 Request.prototype.timeout = function(ms, callback) {
 	var self = this;
 
-	this._timeout = setTimeout(function() {
-		self.destroy();
-	}, ms);
+	if (ms) {
+		this._timeout = setTimeout(function() {
+			self.destroy();
+		}, ms);		
+	}
 
 	return this._short(callback);
 };
@@ -242,6 +247,8 @@ Request.prototype.send = function(data, callback) {
 	var self = this;
 
 	this.destroy = this._send(this._method, this._url+this._query, data, function(err, value) {
+		self.destroy = noop;
+		
 		if (self._timeout) {
 			clearTimeout(self._timeout);
 		}
@@ -338,7 +345,7 @@ JSONP.prototype.send = function(method, callback) {
 			onresult(err);
 			return;
 		}
-		onresult(null, result);
+		onresult(null, result);		
 	};
 
 	var attachErrorHandling = function() {
@@ -372,6 +379,8 @@ JSONP.prototype.send = function(method, callback) {
 	}
 	
 	this.destroy = function() {
+		this.destroy = noop;
+
 		onresult(new Error('jsonp request was cancelled'));
 		globalScope[id] = noop;
 
@@ -413,8 +422,12 @@ var defineTo = function(that, type, send) {
 	return that;
 };
 
+var baddie = window.navigator.userAgent.match(/msie (\d+)/i);
+
+baddie = baddie && baddie[1] && parseInt(baddie[1]);
+
 var corsable = ('withCredentials' in new XMLHttpRequest());
-var proxyable = !!window.postMessage;
+var proxyable = !!window.postMessage && (!baddie || baddie > 7);
 
 exports.jsonp = function(url, callback) {
 	var req = new JSONP(url);
