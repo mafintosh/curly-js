@@ -290,7 +290,7 @@ Request.prototype._addBust = function() {
 	if (!this._bust) {
 		return;
 	}
-	this._query += (this.query ? '&' : '?') + 't='+(new Date()).getTime();
+	this._query += (this._query ? '&' : '?') + 't='+(new Date()).getTime();
 };
 
 var JSONP = function(url) {
