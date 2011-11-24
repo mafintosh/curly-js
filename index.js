@@ -200,6 +200,7 @@ var proxy = function(url) {
 var Request = function(method, url, send) {
 	url = url.split('?');
 
+	this._bust = true;
 	this._send = send;
 	this._method = method;
 	this._url = url[0];
@@ -236,6 +237,14 @@ Request.prototype.json = function(json, callback) {
 	};
 	return this._short(json, callback);
 };
+Request.prototype.bust = function(val, callback) {
+	if (typeof val === 'function') {
+		callback = val;
+		val = true;
+	}
+	this._bust = val !== false;
+	return this._short(callback);	
+};
 Request.prototype.send = function(data, callback) {
 	if (!callback) {
 		callback = data;
@@ -243,6 +252,7 @@ Request.prototype.send = function(data, callback) {
 	} else {
 		data = this._encode(data);
 	}
+	this._addBust();
 
 	var self = this;
 
@@ -276,16 +286,25 @@ Request.prototype._encode = function(data) {
 Request.prototype._decode = function(data) {
 	return data;
 };
+Request.prototype._addBust = function() {
+	if (!this._bust) {
+		return;
+	}
+	this._query += (this.query ? '&' : '?') + 't='+(new Date()).getTime();
+};
 
 var JSONP = function(url) {
 	url = url.split('?');
 
+	this._bust = true;
 	this._url = url[0];
 	this._query = url.slice(1).join('?') || '';
+	this._query = this.query && '?'+this._query;
 };
 
 JSONP.prototype.timeout = Request.prototype.timeout; // exactly the same
 JSONP.prototype.query = Request.prototype.query; // exactly the same
+JSONP.prototype.bust = Request.prototype.bust; // exactly the same
 
 JSONP.prototype.strict = function(callback) {
 	this._strict = true;
@@ -302,6 +321,8 @@ JSONP.prototype.send = function(method, callback) {
 	}
 	callback = callback || noop;
 
+	this._addBust();
+
 	var self = this;
 	var match = this._query.match(/(^|&)([^=])+=\?/);
 	var id = 'cb'+prefix+(cnt++).toString(36);
@@ -314,7 +335,7 @@ JSONP.prototype.send = function(method, callback) {
 		this._query += (this._query ? '&' : '?') + method+'='+callbackId;
 	}
 
-	var url = this._url + this._query;
+	var url = this._url+this._query;
 
 	var onresult = function(err, result) {
 		ended = true;
@@ -394,6 +415,7 @@ JSONP.prototype.send = function(method, callback) {
 JSONP.prototype.destroy = noop;
 
 JSONP.prototype._short = Request.prototype._short; // exactly the same
+JSONP.prototype._addBust = Request.prototype._addBust; // exactly the same
 
 
 var methods = {'POST':0, 'GET':0, 'DELETE':'del', 'PUT':0};
