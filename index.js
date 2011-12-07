@@ -389,7 +389,7 @@ JSONP.prototype.send = function(method, callback) {
 			el.src = url;
 			el.id = id;
 
-			document.body.appendChild(el);
+			document.getElementsByTagName('head')[0].appendChild(el);
 			
 			el = null; // no leaks
 			attachErrorHandling();
