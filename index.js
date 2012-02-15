@@ -81,7 +81,10 @@ var send = function(method, path, data, ondone) {
 		pool.push(xhr);
 
 		if (!/2\d\d/.test(xhr.status)) {
-			callback(new Error('invalid status='+xhr.status));
+			var err = new Error('invalid status='+xhr.status);
+
+			err.statusCode = xhr.status;
+			callback(err);
 			return
 		}
 		callback(null, xhr.responseText);
@@ -343,7 +346,7 @@ JSONP.prototype.send = function(method, callback) {
 		var el = document.getElementById(id);
 		
 		if (el) {
-			el.onreadystatechange = noop;
+			el.onreadystatechange = el.onclick = noop;
 			el.parentNode.removeChild(el);
 		}
 		el = null; // no mem leaks
