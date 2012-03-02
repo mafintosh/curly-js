@@ -249,6 +249,9 @@ Request.prototype.bust = function(val, callback) {
 	return this._short(callback);	
 };
 Request.prototype.send = function(data, callback) {
+	if (!callback && typeof data !== 'function') {
+		callback = noop;
+	}
 	if (!callback) {
 		callback = data;
 		data = null;
