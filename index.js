@@ -473,7 +473,7 @@ exports.cors = function(proxyHost) {
 		var host = hostify(proxyHost);
 
 		return defineTo({}, 'cors', function(method, path, data, ondone) {
-			send(method, host+path, data, ondone);
+			return send(method, host+path, data, ondone);
 		});
 	}
 	if (proxyable) {
