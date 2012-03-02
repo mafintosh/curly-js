@@ -166,10 +166,13 @@ var proxy = function(url) {
 			post({name:'request', id:id, params:params});
 
 			return function() {
-				if (callbacks[id]) {
-					post({name:'destroy', id:id});
-					callbacks[id](new Error('request cancelled'));
+				if (!callbacks[id]) {
+					return;
 				}
+
+				post({name:'destroy', id:id});
+				// this guard is need as the top call can sync cause mutations in callbacks (which is ok)
+				(callbacks[id] || noop)(new Error('request cancelled'));
 			};
 		};
 
