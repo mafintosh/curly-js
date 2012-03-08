@@ -29,6 +29,51 @@ window.onunload = function() {
 	}
 };
 
+var createDeferred = function() {
+	var that = {};
+	var stack = [];
+
+	var action = function(method, path, data, callback) {
+		callback = callback || noop;
+
+		var send = function() {
+			destroy = action(method, path, data, callback);
+		};
+		var destroy = function() {			
+			for (var i = 0; i < stack.length; i++) {
+				if (stack[i] === send) {
+					stack.splice(i, 1);
+					break;
+				}
+			}
+
+			callback(new Error('request cancelled'));
+		};
+
+		stack.push(send);
+
+		return function() {
+			destroy();
+		};
+	};
+
+	that.fulfilled = false;
+
+	that.ready = function(fn) {
+		that.fulfilled = true;
+		action = fn;
+
+		while (stack.length) {
+			stack.shift()();
+		}
+	};
+	that.send = function(a,b,c,d) {
+		return action(a,b,c,d);
+	};
+
+	return that;
+};
+
 var hostify = function(address) {
 	return address.match(/(http|https):\/\/([^\/]+)/).slice(1).join('://');
 };
@@ -59,7 +104,6 @@ var querify = function(query) {
 };
 var send = function(method, path, data, ondone) {
 	var xhr = pool.length ? pool.pop() : new XMLHttpRequest();
-
 	var id = ''+(++cnt);
 	var called = false;
 
@@ -67,6 +111,7 @@ var send = function(method, path, data, ondone) {
 		if (called) {
 			return;
 		}
+
 		called = true;
 		ondone(err, value);
 	};
@@ -87,6 +132,7 @@ var send = function(method, path, data, ondone) {
 			callback(err);
 			return
 		}
+
 		callback(null, xhr.responseText);
 	};
 
@@ -95,6 +141,7 @@ var send = function(method, path, data, ondone) {
 		if (xhr.readyState !== 4) {
 			return;
 		}
+
 		tidy();
 		setTimeout(onresponse, 1); // push it to the event stack
 	};
@@ -104,6 +151,7 @@ var send = function(method, path, data, ondone) {
 		if (called) {
 			return;
 		}
+
 		tidy();
 		xhr.abort();
 		callback(new Error('request aborted'));
@@ -118,8 +166,8 @@ var proxy = function(url) {
 	}
 
 	var host = url.match(/^[^:]+:\/\/[^\/]+/i)[0];
+	var deferred = createDeferred();
 	var callbacks = {};
-	var stack = [];
 
 	var post = function() {
 		var ifr = document.createElement('iframe');
@@ -136,61 +184,39 @@ var proxy = function(url) {
 			message = null; // no ie leaks					
 		};
 	}();
-	var send = function(message, callback) {
-		var destroy;
+	var ready = function(method, path, data, callback) {
+		var params = [method, path, data];
+		var id = 's'+(cnt++);
 
-		stack.push(function() {
-			if (destroy) {
-				return;
-			}
-			destroy = send(message, callback);
-		});
+		callback = callback || noop;
+		callbacks[id] = function(err, result) {
+			delete callbacks[id];
+
+			callback(err, result);
+		};
+
+		post({name:'request', id:id, params:params});
+
 		return function() {
-			if (destroy) {
-				destroy();
+			if (!callbacks[id]) {
 				return;
 			}
-			destroy = noop;
-			callback(new Error('request cancelled'));
+
+			post({name:'destroy', id:id});
+			// this guard is need as the top call can sync cause mutations in callbacks (which is ok)
+			(callbacks[id] || noop)(new Error('request cancelled'));
 		};
-	};
-	var ready = function() {
-		send = function(params, callback) {
-			var id = 's'+(cnt++);
-
-			callbacks[id] = function(err, result) {
-				delete callbacks[id];
-
-				callback(err, result);
-			};
-			post({name:'request', id:id, params:params});
-
-			return function() {
-				if (!callbacks[id]) {
-					return;
-				}
-
-				post({name:'destroy', id:id});
-				// this guard is need as the top call can sync cause mutations in callbacks (which is ok)
-				(callbacks[id] || noop)(new Error('request cancelled'));
-			};
-		};
-
-		while (stack.length) {
-			stack.shift()();
-		}
-		stack = undefined;
 	};
 
 	addEvent('message', function(e) {
 		if (e.origin !== host) {
 			return;
 		}
-
-		if (stack) {
-			ready();
+		if (!deferred.fulfilled) {
+			deferred.ready(ready);
 			return;
 		}
+
 		var message = JSON.parse(e.data);
 
 		(callbacks[message.id] || noop)(message.error && new Error(message.error), message.result);				
@@ -198,10 +224,9 @@ var proxy = function(url) {
 	});
 
 	return cache[url] = function(method, path, data, callback) {
-		return send([method, path, data], callback);
+		return deferred.send(method, path, data, callback);
 	};
 };
-
 
 var Request = function(method, url, send) {
 	url = url.split('?');
@@ -468,13 +493,34 @@ exports.jsonp = function(url, callback) {
 	}
 	return req;
 };
-exports.cors = function(proxyHost) {
+exports.cors = function(options) {
+	var ping;
+	var proxyHost;
+
+	if (typeof options === 'string') {
+		proxyHost = options;
+	} else {
+		proxyHost = options.host+options.proxy;
+		ping = options.ping && (options.host+ (typeof options.ping === 'string' ? options.ping : options.proxy));
+	}
+
 	if (corsable) {
+		var deferred = createDeferred();
 		var host = hostify(proxyHost);
 
-		return defineTo({}, 'cors', function(method, path, data, ondone) {
-			return send(method, host+path, data, ondone);
-		});
+		var oncors = function(method, path, data, callback) {
+			return send(method, host+path, data, callback);
+		};
+
+		if (ping) {
+			send('GET', ping, null, function(err, data) {
+				deferred.ready(err ? proxy(proxyHost) : oncors);
+			});
+		} else {
+			deferred.ready(oncors);
+		}
+
+		return defineTo({}, 'cors', deferred.send);
 	}
 	if (proxyable) {
 		return defineTo({}, 'proxy', proxy(proxyHost));
