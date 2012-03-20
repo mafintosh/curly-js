@@ -21,7 +21,6 @@ var cache = {};
 var globalScope = window._tmp_jsonp = {}; // A global variable to reference jsonp closures
 var cnt = 0;
 var active = {};
-var pool = [];
 
 window.onunload = function() {
 	for (var i in active) {
@@ -103,7 +102,7 @@ var querify = function(query) {
 	return result;
 };
 var send = function(method, path, data, ondone) {
-	var xhr = pool.length ? pool.pop() : new XMLHttpRequest();
+	var xhr = new XMLHttpRequest();
 	var id = ''+(++cnt);
 	var called = false;
 
@@ -123,8 +122,6 @@ var send = function(method, path, data, ondone) {
 		xhr.onreadystatechange = noop;		
 	};
 	var onresponse = function() {
-		pool.push(xhr);
-
 		if (!/2\d\d/.test(xhr.status)) {
 			var err = new Error('invalid status='+xhr.status);
 
@@ -145,6 +142,7 @@ var send = function(method, path, data, ondone) {
 		tidy();
 		setTimeout(onresponse, 1); // push it to the event stack
 	};
+
 	xhr.send(data);
 	
 	return function() {
